@@ -26,9 +26,15 @@
     INTEGER NL,NW
     REAL mufix
 !PDF for subsource position
-    INTEGER,PARAMETER:: pdfNL=2000,pdfNW=1000
+!     INTEGER,PARAMETER:: pdfNL=2000,pdfNW=1000
+
+! modified after the mail of Gallovic by Elif
+    INTEGER,PARAMETER:: pdfNL=200, pdfNW=100
+
     REAL,ALLOCATABLE:: pdf2D(:,:),cpdf2D(:,:)
-    REAL pdfDL,pdfDW,pdfGaussL,pdfGaussW,pdfGaussSL,pdfGaussSW
+! Elif
+    REAL,ALLOCATABLE:: pdf2D_modif(:,:),cpdf2D_modif(:,:)
+    REAL pdfDL,pdfDW,pdfGaussL,pdfGaussW,pdfGaussS
     REAL,ALLOCATABLE:: ruptimegen(:)
     CHARACTER*256 filename
     INTEGER ml(2),pdfOption,fileNL,fileNW
@@ -44,6 +50,11 @@
 !others
     REAL ran2,dum,dumL,dumW,dumphi,dumr,totmoment,time,meanVR,ruptime,ruptimeSR,momentcorr
     INTEGER i,j,k,m,hits
+
+! pdf modification by Elif (15/11/18)
+    REAL cst_claudio
+
+
     
     open(101,FILE='RIKsrf.in')
     read(101,*)
@@ -78,7 +89,7 @@
     read(101,*)SUBMIN,SUBMAX
     read(101,*)
     read(101,*)pdfOption
-    if(pdfOption==2)read(101,*)pdfGaussL,pdfGaussW,pdfGaussSL,pdfGaussSW
+    if(pdfOption==2)read(101,*)pdfGaussL,pdfGaussW,pdfGaussS
     if(pdfOption==3)read(101,*)fileNL,fileNW,filename
     read(101,*)
     read(101,*)idum1,idum2
@@ -121,7 +132,11 @@
 !Preparing PDF for distribution of subsources
     write(*,*)'Preparing PDF for subsource distribution...'
     ALLOCATE(pdf2D(pdfNL,pdfNW),cpdf2D(pdfNL,pdfNW))
-    CALL fillpdf(pdfNL,pdfNW,LF,WF,L,W,smL,smW,pdf2D,cpdf2D,pdfOption,filename,fileNL,fileNW,pdfGaussL,pdfGaussW,pdfGaussSL,pdfGaussSW)
+    ALLOCATE(pdf2D_modif(pdfNL,pdfNW),cpdf2D_modif(pdfNL,pdfNW))
+
+
+    CALL fillpdf(pdfNL,pdfNW,LF,WF,L,W,smL,smW,pdf2D,cpdf2D,pdfOption,filename,fileNL,fileNW,pdfGaussL,pdfGaussW,pdfGaussS)
+
     pdfDL=LF/real(pdfNL)
     pdfDW=WF/real(pdfNW)
     write(*,*)'... done.'
@@ -196,23 +211,45 @@
         k=k+1
         SUBsize(k)=W/float(i)/2.   !radius
        
+
+        !!! fonction de exposant
+        cst_claudio = SUBsize(k)- W/2./real(SUBmax)
+        cst_claudio = cst_claudio/ (W/2.)/ (1./SUBmin- 1./SUBmax)
+        pdf2D_modif = pdf2D** cst_claudio
+        call cumulelif(pdfNL,pdfNW,pdf2D_modif, cpdf2D_modif)
+          
+
+
 ! Locating the subsource according to the PDF
         do
 !          if(k==1.and.pdfOption.ne.1)then   !Put the largest subsource at the position of the PDF maximum
 !            ml=maxloc(pdf2D(:,:))
 !          else
-            ml=minloc(abs(cpdf2D(:,:)-ran2(idum1)))
+!            ml=minloc(abs(cpdf2D(:,:)-ran2(idum1)))
+            
+            !Elif
+            ml=minloc(abs(cpdf2D_modif(:,:)-ran2(idum1)))
 !          endif
-          SUBposL(k)=(real(ml(1))-.5)*pdfDL
-          
+
+          ! find a random location of x
+          SUBposL(k)=(real(ml(1))-.5)*pdfDL         
+          ! if allowing a circle of radius W/2 and it's its turn in the loop:
           if(SUBmin==1.and.i==1)then
             SUBposW(k)=W/2.
+            ! checking here if the chosen location is inside!
             if(SUBposL(k)-SUBsize(k)>=0..and.SUBposL(k)+SUBsize(k)<=LF)exit
           else
-            SUBposW(k)=(real(ml(2))-.5)*pdfDW
+          ! find a random location of y
+             SUBposW(k)=(real(ml(2))-.5)*pdfDW
+            ! checking here if the chosen location is inside!
             if(SUBposL(k)-SUBsize(k)>=0..and.SUBposW(k)-SUBsize(k)>=0..and.SUBposL(k)+SUBsize(k)<=LF.and.SUBposW(k)+SUBsize(k)<=WF)exit
           endif
         enddo
+
+
+
+
+
 
         do m=1,NSR
           dum=SUBsize(k)**2-(SRl(m)-SUBposL(k))**2-(SRw(m)-SUBposW(k))**2
@@ -228,7 +265,11 @@
     enddo
     totmoment=sum(SRmoment(:))
     momentcorr=M0/totmoment
-    write(*,*)totmoment*momentcorr
+!     write(*,*)totmoment*momentcorr
+    write(*,*) 'Defined moment: ', totmoment*momentcorr
+    write(*,*) 'Correction factor: ', momentcorr
+
+
     SUBslip=SUBslip*momentcorr
     SUBmoment=SUBmoment*momentcorr
     SRslip=SRslip*momentcorr
@@ -260,21 +301,24 @@
         dumL=dumr*cos(dumphi);dumW=dumr*sin(dumphi)
         SUBnuclL(k)=dumL+SUBposL(k)
         SUBnuclW(k)=dumW+SUBposW(k)
+         SUBruptime(k)=ruptimegen(int(SUBnuclW(k)/W*float(NW-1))*NL+int(SUBnuclL(k)/L*float(NL-1))+1)
+        SUBmvr(k)=SUBmvr(k)*vrsubfact
         SUBrisetime(k)=aparam*2.*SUBsize(k)/SUBmvr(k)
       endif
-      SUBruptime(k)=ruptimegen(int(SUBposW(k)/W*float(NW-1))*NL+int(SUBposL(k)/L*float(NL-1))+1)
-      SUBmvr(k)=SUBmvr(k)*vrsubfact
     enddo
     write(*,*)'... done.'
 
     open(201,FILE='subsources.dat')
     do k=1,SUBtot
-      write(201,'(10E13.5)')SUBposL(k),SUBposW(k),SUBsize(k),SUBmoment(k),SUBruptime(k),SUBrisetime(k),SUBmvr(k)
+!       write(201,'(10E13.5)')SUBposL(k),SUBposW(k),SUBsize(k),SUBmoment(k),SUBruptime(k),SUBrisetime(SUBtot),SUBmvr(SUBtot)
+
+! ELIF modif 13/09/18 - to see rise time and mean_Vr changes
+        write(201,'(10E13.5)')SUBposL(k),SUBposW(k),SUBsize(k),SUBmoment(k),SUBruptime(k),SUBrisetime(k),SUBmvr(k)
+
     enddo
     close(201)
     
 !Evaluating slip rates
-  if(NT>0)then
     write(*,*)'Preparing and saving slip rates...'
     allocate(sr(NT),stf(NT))
     open(201,FILE='sr.dat')
@@ -284,6 +328,7 @@
       sr=0.
       ruptimeSR=ruptimegen(i)    !Comment to go back to the version without rupt. vel. perturbations
 !$OMP parallel do private(j,k,time,ruptime,dum) DEFAULT(SHARED)
+
       do j=1,NT
         time=dt*(j-1)
         do k=1,SUBtot
@@ -301,6 +346,7 @@
           endif
         enddo
       enddo
+
 !$OMP end parallel do
       stf(:)=stf(:)+sr(:)*SRelem(i)*SRmu(i)
       totmoment=totmoment+sum(sr(:))*SRelem(i)*SRmu(i)*dt
@@ -311,25 +357,23 @@
       write(201,*)
       write(201,*)
     enddo
+    
     close(201)
-    write(*,*)totmoment
+    write(*,*) 'Total moment: ', totmoment
     open(201,FILE='stf.dat')
     do i=1,NT
       write(201,*)dt*(i-1),stf(i)
     enddo
     write(*,*)'... done.'
-  else
-    write(*,*)'Only subsource parameters generated.'
-  endif
-  
+    
     END PROGRAM
     
     
-    SUBROUTINE fillpdf(pdfNL,pdfNW,LF,WF,L,W,smL,smW,pdf2D,cpdf2D,pdfOption,filename,fileNL,fileNW,pdfGaussL,pdfGaussW,pdfGaussSL,pdfGaussSW)  ! creates pdf and cumulative pdf for subsource distribution
+    SUBROUTINE fillpdf(pdfNL,pdfNW,LF,WF,L,W,smL,smW,pdf2D,cpdf2D,pdfOption,filename,fileNL,fileNW,pdfGaussL,pdfGaussW,pdfGaussS)  ! creates pdf and cumulative pdf for subsource distribution
     IMPLICIT NONE
     INTEGER pdfNL,pdfNW,pdfOption
     REAL pdf2D(pdfNL,pdfNW),cpdf2D(pdfNL,pdfNW)
-    REAL LF,WF,L,W,smL,smW,pdfGaussL,pdfGaussW,pdfGaussSL,pdfGaussSW
+    REAL LF,WF,L,W,smL,smW,pdfGaussL,pdfGaussW,pdfGaussS
     CHARACTER*256 filename
     INTEGER i,j,k,fileNL,fileNW
     REAL cumul,pdfDL,pdfDW,slipDL,slipDW
@@ -353,7 +397,7 @@
       write(*,*)'Gaussian PDF for subsources'
       do j=pjfrom,pjto
         do i=pifrom,pito
-          pdf2D(i,j)=exp(-.5*(((real(i)-.5)*pdfDL-pdfGaussL)**2/pdfGaussSL**2+((real(j)-.5)*pdfDW-pdfGaussW)**2/pdfGaussSW**2))
+          pdf2D(i,j)=exp(-.5*((((real(i)-.5)*pdfDL-pdfGaussL)**2+((real(j)-.5)*pdfDL-pdfGaussW)**2)/pdfGaussS**2)**2)
         enddo
       enddo
     CASE(3)
@@ -376,9 +420,30 @@
       write(*,*)'Wrong pdfOption!'
       stop
     END SELECT
-!normalize and calculate cumulative distribution
+! !normalize and calculate cumulative distribution
+!     k=0
+!     cumul=0
+!     do j=1,pdfNW
+!       do i=1,pdfNL
+!         k=k+1
+!         cumul=cumul+pdf2D(i,j)
+!         cpdf2D(i,j)=cumul
+!       enddo
+!     enddo
+!     pdf2D=pdf2D/cumul
+!     cpdf2D=cpdf2D/cumul
+
+    call cumulelif(pdfNL,pdfNW,pdf2D, cpdf2D)
+
+    END SUBROUTINE
+
+    
+    
+    SUBROUTINE cumulelif(pdfNL,pdfNW,pdf2D, cpdf2D)
+    INTEGER k, i, j, pdfNL, pdfNW
+    REAL pdf2D(pdfNL,pdfNW),cpdf2D(pdfNL,pdfNW), cumul
     k=0
-    cumul=0
+    cumul=0.0
     do j=1,pdfNW
       do i=1,pdfNL
         k=k+1
@@ -389,8 +454,8 @@
     pdf2D=pdf2D/cumul
     cpdf2D=cpdf2D/cumul
     END SUBROUTINE
-    
-    
+
+
     FUNCTION meanVR(x,y,r)   !calculate mean rupture velocity (just slowness mean over subsource depth extent)
     USE ruptveloc
     IMPLICIT NONE
