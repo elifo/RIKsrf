@@ -1,0 +1,9 @@
+Crustal model - after Prof. Narcessian
+number of layers:
+  4
+Parameters of the layers
+depth of layer top(km)   Vp(km/s)    Vs(km/s)    Rho(g/cm**3)    Qp     Qs
+    0.       3.5     1.99      2.4    300  150
+    3.       6.0     3.41      2.7    300  150
+   15.       7.0     3.98      3.0    300  150
+   30.       8.0     4.55      3.3    300  150
